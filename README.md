@@ -122,6 +122,14 @@ the duration belongs to the other layer's ladder, dark for unmatched sizes.
 | 3   | hold to enable effect 3 | select effect 3 | BPM ×2  |
 | 4   | hold to enable FX unit  | —               | BPM ½   |
 
+**While holding an FX pad** (default layer) the deck becomes an effect
+performance surface:
+
+| Control        | Action                                                   |
+| -------------- | -------------------------------------------------------- |
+| EQ knob        | held effect's level (dry/wet)                            |
+| Wheel rotation | cycle the loaded effect in that slot (CW next, CCW prev) |
+
 ### Sampler mode
 
 | Pad | Default                                               | Select               |
@@ -130,18 +138,22 @@ the duration belongs to the other layer's ladder, dark for unmatched sizes.
 
 ## Knobs & faders
 
-| Control      | Default / Select                             | Alt               |
-| ------------ | -------------------------------------------- | ----------------- |
-| Filter knob  | QuickEffect filter (left = LPF, right = HPF) | **EQ high band**  |
-| EQ knob      | EQ low band                                  | **EQ mid band**   |
-| Volume fader | channel volume                               | channel volume    |
-| Crossfader   | master crossfader                            | master crossfader |
-| Pitch fader  | deck rate                                    | deck rate         |
+| Control      | Default / Select                             | Alt              | While holding an FX pad |
+| ------------ | -------------------------------------------- | ---------------- | ----------------------- |
+| Filter knob  | QuickEffect filter (left = LPF, right = HPF) | **EQ high band** | QuickEffect filter      |
+| EQ knob      | EQ low band                                  | **EQ mid band**  | held effect's level     |
+| Volume fader | channel volume                               | channel volume   | channel volume          |
+| Wheel edge   | pitch bend                                   | pitch bend       | cycle loaded effects    |
+| Volume fader | channel volume                               | channel volume   | channel volume               |
+| Crossfader   | master crossfader                            | master crossfader| master crossfader            |
+| Pitch fader  | deck rate                                    | deck rate        | deck rate                    |
 
 The Filter/EQ knobs use a manual soft-takeover across the Alt toggle: after
 latching/unlatching Alt, a knob is inert until its position _crosses_ the
 new band's current value (or until it moves, if it already sits within
-~1 tick of it).
+~1 tick of it). The EQ bands span 0…4 on a logarithmic scale — the knobs use
+a matching curve so the detent (center) sits exactly at unity, full left is
+full cut and full right is full boost.
 
 ## LEDs
 

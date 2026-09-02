@@ -148,8 +148,14 @@ DJCStarlight._padDeckGroup = function (channel) {
 // so the band does not jump to the knob's physical position. The first knob
 // event after startup re-syncs the software to the physical position.
 DJCStarlight.knobState = {
-	1: { filter: { pending: true, lastVal: null }, eq: { pending: true, lastVal: null } },
-	2: { filter: { pending: true, lastVal: null }, eq: { pending: true, lastVal: null } },
+	1: {
+		filter: { pending: true, lastVal: null },
+		eq: { pending: true, lastVal: null },
+	},
+	2: {
+		filter: { pending: true, lastVal: null },
+		eq: { pending: true, lastVal: null },
+	},
 };
 
 DJCStarlight._setKnobTakeover = function () {
@@ -160,17 +166,34 @@ DJCStarlight._setKnobTakeover = function () {
 	}
 };
 
-DJCStarlight._applyKnob = function (deck, knob, value, targetGroup, targetKey) {
+DJCStarlight._applyKnob = function (deck, knob, value, targetGroup, targetKey, scale) {
 	var state = DJCStarlight.knobState[deck][knob];
+	var knobFrac = value / 127;
+	var scaled;
+	var coToFrac = function (co) {
+		return co / (scale === undefined ? 1 : scale);
+	};
+	if (scale === "eq") {
+		// The LVMix EQ bands span 0..4 on a logarithmic UI scale with unity
+		// at the halfway point. Map the knob so the detent (center) sits at
+		// unity: linear below unity, exponential above.
+		scaled = knobFrac <= 0.5 ? knobFrac * 2 : Math.pow(4, (knobFrac - 0.5) * 2);
+		coToFrac = function (co) {
+			return co <= 1 ? co / 2 : 0.5 + (Math.log(co) / Math.log(4)) / 2;
+		};
+	} else {
+		scaled = knobFrac * (scale === undefined ? 1 : scale);
+	}
 	if (state.lastVal === null) {
 		// First event after startup: learn the physical position and sync.
 		state.lastVal = value;
 		state.pending = false;
-		engine.setValue(targetGroup, targetKey, value / 127);
+		engine.setValue(targetGroup, targetKey, scaled);
 		return;
 	}
 	if (state.pending) {
-		var targetVal = engine.getValue(targetGroup, targetKey) * 127;
+		var co = engine.getValue(targetGroup, targetKey);
+		var targetVal = coToFrac(co) * 127;
 		// A knob sitting at (or within ~1 tick of) the target is considered
 		// aligned: any movement engages immediately. Otherwise the knob must
 		// cross the target value before it takes effect.
@@ -186,13 +209,20 @@ DJCStarlight._applyKnob = function (deck, knob, value, targetGroup, targetKey) {
 		state.pending = false;
 	}
 	state.lastVal = value;
-	engine.setValue(targetGroup, targetKey, value / 127);
+	engine.setValue(targetGroup, targetKey, scaled);
 };
 
 DJCStarlight.filterKnob = function (channel, control, value, status, group) {
 	var deck = channel;
 	if (DJCStarlight.latchedLayer == "Alt") {
-		DJCStarlight._applyKnob(deck, "filter", value, "[EqualizerRack1_" + group + "_Effect1]", "parameter3");
+		DJCStarlight._applyKnob(
+			deck,
+			"filter",
+			value,
+			"[EqualizerRack1_" + group + "_Effect1]",
+			"parameter3",
+			"eq",
+		);
 	} else {
 		DJCStarlight._applyKnob(deck, "filter", value, "[QuickEffectRack1_" + group + "]", "super1");
 	}
@@ -200,11 +230,17 @@ DJCStarlight.filterKnob = function (channel, control, value, status, group) {
 
 DJCStarlight.eqKnob = function (channel, control, value, status, group) {
 	var deck = channel;
+	var held = DJCStarlight._heldFxGroup(deck);
+	if (held) {
+		// An effect is being held on this deck: the knob is its level.
+		engine.setValue(held, "meta", value / 127);
+		return;
+	}
 	var eqGroup = "[EqualizerRack1_" + group + "_Effect1]";
 	if (DJCStarlight.latchedLayer == "Alt") {
-		DJCStarlight._applyKnob(deck, "eq", value, eqGroup, "parameter2");
+		DJCStarlight._applyKnob(deck, "eq", value, eqGroup, "parameter2", "eq");
 	} else {
-		DJCStarlight._applyKnob(deck, "eq", value, eqGroup, "parameter1");
+		DJCStarlight._applyKnob(deck, "eq", value, eqGroup, "parameter1", "eq");
 	}
 };
 
@@ -295,18 +331,48 @@ DJCStarlight.loopPad = function (channel, control, value, status, group) {
 	var sizes = [1, 2, 4, 8];
 	engine.setValue(group, "beatloop_" + sizes[pad - 1] + "_toggle", 1);
 };
-
 // FX pads: hold to enable the effect; in the Select layer, BPM editing.
+// While effect slots 1-3 are held, that deck's EQ knob is the effect level,
+// the Filter knob its main parameter and the wheel cycles loaded effects.
+// The FX unit pad (4) does not participate in that.
+DJCStarlight.heldFx = { 1: [], 2: [] };
+
+DJCStarlight._fxHeld = function (deck) {
+	return DJCStarlight.heldFx[deck].length > 0;
+};
+
+DJCStarlight._heldFxGroup = function (deck) {
+	var stack = DJCStarlight.heldFx[deck];
+	return stack.length ? stack[stack.length - 1] : null;
+};
+
 DJCStarlight.fxPad = function (channel, control, value, status, group) {
+	var deck = channel - 5;
+	var slot = DJCStarlight._padIndex(control);
 	if (DJCStarlight.latchedLayer == "Select") {
 		// Select layer: only the press does BPM editing; releases are ignored
 		// so no effect state is touched.
 		if (value > 0) {
-			DJCStarlight._selectBpmPad(DJCStarlight._padDeckGroup(channel), DJCStarlight._padIndex(control));
+			DJCStarlight._selectBpmPad(DJCStarlight._padDeckGroup(channel), slot);
 		}
 		return;
 	}
-	engine.setValue(group, "enabled", value > 0 ? 1 : 0);
+	if (value > 0) {
+		engine.setValue(group, "enabled", 1);
+	} else {
+		engine.setValue(group, "enabled", 0);
+	}
+	if (slot != 4) {
+		// Track the most recently pressed still-held effect slot.
+		var stack = DJCStarlight.heldFx[deck];
+		var pos = stack.indexOf(group);
+		if (pos != -1) {
+			stack.splice(pos, 1);
+		}
+		if (value > 0) {
+			stack.push(group);
+		}
+	}
 };
 
 // Sampler pads: trigger the sampler; in the Select layer, BPM editing.
@@ -680,8 +746,8 @@ DJCStarlight._convertWheelRotation = function (value) {
 // The touch action on the jog wheel's top surface
 DJCStarlight.wheelTouch = function (channel, control, value, status, group) {
 	var deck = channel;
-	if (value > 0 && DJCStarlight.latchedLayer == "Select") {
-		// Select layer: deck functions are disabled on the wheels.
+	if (value > 0 && (DJCStarlight.latchedLayer == "Select" || DJCStarlight._fxHeld(deck))) {
+		// Select layer / effect mode: the top surface is ignored.
 		return;
 	}
 	if (value > 0) {
@@ -738,6 +804,10 @@ DJCStarlight.scratchWheel = function (channel, control, value, status, group) {
 		}
 		return;
 	}
+	if (DJCStarlight._fxHeld(deck) && !DJCStarlight.shiftPressed) {
+		// Effect mode: the top surface is ignored (the edge cycles effects).
+		return;
+	}
 	DJCStarlight._scratchWheelImpl(deck, value);
 };
 
@@ -778,6 +848,15 @@ DJCStarlight.bendWheel = function (channel, control, value, status, group) {
 		// Move the loop by one beat per processed tick.
 		if (DJCStarlight._throttleTicks()) {
 			engine.setValue("[Channel" + channel + "]", "loop_move", DJCStarlight._convertWheelRotation(value));
+		}
+		return;
+	}
+	var held = DJCStarlight.heldFx[channel];
+	if (held) {
+		// Holding an FX pad: the wheel cycles the loaded effect in that slot.
+		if (DJCStarlight._throttleTicks()) {
+			var rotation = DJCStarlight._convertWheelRotation(value);
+			engine.setValue(held, rotation > 0 ? "next_effect" : "prev_effect", 1);
 		}
 		return;
 	}

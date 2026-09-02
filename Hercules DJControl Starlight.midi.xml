@@ -1047,7 +1047,7 @@
             <control>
                 <group>[Channel2]</group>
                 <key>volume</key>
-                <description>Volume Deck A</description>
+                <description>Volume Deck B</description>
                 <status>0xB2</status>
                 <midino>0x00</midino>
                 <options>
